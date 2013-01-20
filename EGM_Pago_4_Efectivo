@@ -1,0 +1,223 @@
+<?php
+/*
+  without:
+		Numero de prioridad
+		Español
+		Icon
+		Plantilla
+		show error
+		AIO (Efectivo, Cash, Credit, Payment and CreditCards)
+			varian el estado
+			los mensajes
+			Logos de Pago (Agregar Transferencia, Cheque y Pago Contra Entrega)
+		in config show enabled currencies
+*/
+
+/*
+* 2001-2013 EGMSystems.net
+*
+*  @author EGMSystems.net <PrestaShop@EGMSystems.net>
+*  @copyright  2001-2013 EGMSystems.net
+*/
+
+if (!defined('_PS_VERSION_'))
+	exit;
+
+class EGM_Pago_4_Efectivo extends PaymentModule
+{
+	private $_html = '';
+	private $_postErrors = array();
+
+	public $Mensajes;
+	public $extra_mail_vars;
+	public function __construct()
+	{
+		$this->name = 'EGM_Pago_4_Efectivo';
+		$this->tab = 'payments_gateways';
+		$this->version = '0.1b2013-01-19 09:01:22';
+		$this->author = 'EGMSystems.net';
+		
+		$this->currencies = true;
+		$this->currencies_mode = 'checkbox';
+
+		$config = Configuration::getMultiple(array('EGM_Pago_4_Efectivo_Mensaje'));
+		if (isset($config['EGM_Pago_4_Efectivo_Mensaje']))
+			$this->Mensajes = $config['EGM_Pago_4_Efectivo_Mensaje'];
+
+		parent::__construct();
+
+		$this->displayName = $this->l('EGM_Pago_4_Efectivo');
+		$this->description = $this->l('Aceptar Pago por Efectivo.');
+		$this->confirmUninstall = $this->l('Seguro desea eliminar la configuracion?');
+		if (!isset($this->Mensajes))
+			$this->warning = $this->l('Debe configurar este modulo para que funcione apropiadamente.');
+		if (!count(Currency::checkPaymentCurrencies($this->id)))
+			$this->warning = $this->l('No hay moneda configurada para este modulo');
+
+		$this->extra_mail_vars = array(
+										'{EGM_Pago_4_Efectivo_Mensajes}' => nl2br(Configuration::get('EGM_Pago_4_Efectivo_Mensaje'))
+										);
+	}
+
+	public function install()
+	{
+		if (!parent::install() || !$this->registerHook('payment') || !$this->registerHook('paymentReturn'))
+			return false;
+		if(!Db::getInstance()->Insert(
+				'order_state', array(
+					'module_name' => $this->name,
+					'color'      => 'RoyalBlue',
+					'unremovable' => 0
+					)))
+			return false;
+		$sql = 'SELECT id_order_state FROM '._DB_PREFIX_.'order_state where module_name="'.$this->name.'"';
+		$id_order_state = (int) Db::getInstance()->getValue($sql);
+		if ($id_order_state < 1)
+			return false;
+		if(!Db::getInstance()->insert(
+			'order_state_lang', array(
+				'id_order_state'	  => $id_order_state,
+				'id_lang' => 4,
+				'name'      => 'Esperando Pago en Efectivo',
+				'template' => ""
+				)))
+			return false;
+		if (!Configuration::updateValue('EGM_Pago_4_Efectivo_OS', $id_order_state))
+			return false;
+		if (!copy("../modules/EGM_Pago_6_Credito/order_state_mini.gif", "../img/os/".$id_order_state.".gif"))
+			return false;
+		return true;
+	}
+
+	public function uninstall()
+	{
+		$sql = 'SELECT COUNT (*) FROM '._DB_PREFIX_.'order_state where module_name="'.$this->name.'"';
+		$registros = (int)Db::getInstance()->getValue($sql);
+		Db::getInstance()->delete('order_state','module_name="'.$this->name.'"',$registros);
+		$sql = 'SELECT COUNT (*) FROM '._DB_PREFIX_.'order_state_lang where module_name="'.$this->name.'"';
+		$registros = (int)Db::getInstance()->getValue($sql);
+		Db::getInstance()->delete('order_state_lang', 'module_name = '.$this->name, $registros);
+		if (!Configuration::deleteByName('EGM_Pago_4_Efectivo_Mensaje')
+				|| !Configuration::deleteByName('EGM_Pago_4_Efectivo_OS')
+				|| !parent::uninstall())
+			return false;
+		return true;
+	}
+
+	private function _postValidation()
+	{
+		if (Tools::isSubmit('btnSubmit'))
+		{
+			if (!Tools::getValue('Mensajes'))
+				$this->_postErrors[] = $this->l('Mensaje Requerido.');
+		}
+	}
+
+	private function _postProcess()
+	{
+		if (Tools::isSubmit('btnSubmit'))
+		{		
+			Configuration::updateValue('EGM_Pago_4_Efectivo_Mensaje', Tools::getValue('Mensajes'));
+		}
+		$this->_html .= '<div class="conf confirm"> '.$this->l('UpDated').'</div>';
+		// return transaction ??
+	}
+
+	private function _displayEGM_Pago_4_Efectivo()
+	{
+		$this->_html .= '<img src="../modules/EGM_Pago_4_Efectivo/logo.jpg" style="float:left; margin-right:15px;"><b>'.$this->l('Este modulo le permite aceptar pagos por Cuenta del BNacional.com.').'</b><br /><br />
+		'.$this->l('Si el cliente elije este modo de pago, se cambiara el estado de la orden a \'Esperando Pago por Efectivo\'.').'<br />
+		'.$this->l('Se debe validar la orden en manualmente en BNacional.com.').'<br /><br /><br />';
+	}
+
+	private function _displayForm()
+	{
+		$this->_html .=
+		'<form action="'.Tools::htmlentitiesUTF8($_SERVER['REQUEST_URI']).'" method="post">
+			<fieldset>
+			<legend><img src="../img/admin/contact.gif" />'.$this->l('Contact Data').'</legend>
+				<table border="0" width="500" cellpadding="0" cellspacing="0" id="form">
+					<tr><td colspan="2">'.$this->l('Especificar el mensaje para el pago por Efectivo').'.<br /><br /></td></tr>
+					<tr>
+						<td width="130" style="vertical-align: top;">'.$this->l('Mensajes').'</td>
+						<td style="padding-bottom:15px;">
+							<textarea name="Mensajes" rows="4" cols="53">'.htmlentities(Tools::getValue('Mensajes', $this->Mensajes), ENT_COMPAT, 'UTF-8').'</textarea>
+						</td>
+					</tr>
+					<tr><td colspan="2" align="center"><input class="button" name="btnSubmit" value="'.$this->l('Actualizar').'" type="submit" /></td></tr>
+				</table>
+			</fieldset>
+		</form>';
+	}
+
+	public function getContent()
+	{
+		$this->_html = '<h2>'.$this->displayName.'</h2>';
+
+		if (Tools::isSubmit('btnSubmit'))
+		{
+			$this->_postValidation();
+			if (!count($this->_postErrors))
+				$this->_postProcess();
+			else
+				foreach ($this->_postErrors as $err)
+					$this->_html .= '<div class="alert error">'.$err.'</div>';
+		}
+		else
+			$this->_html .= '<br />';
+
+		$this->_displayEGM_Pago_4_Efectivo();
+		$this->_displayForm();
+
+		return $this->_html;
+	}
+
+	public function hookPayment($params)
+	{
+		if (!$this->active)
+			return;
+		if (!$this->checkCurrency($params['cart']))
+			return;
+
+
+		$this->smarty->assign(array(
+			'this_path' => $this->_path,
+			'this_path_ssl' => Tools::getShopDomainSsl(true, true).__PS_BASE_URI__.'modules/'.$this->name.'/'
+		));
+		return $this->display(__FILE__, 'payment.tpl');
+	}
+
+	public function hookPaymentReturn($params)
+	{
+		if (!$this->active)
+			return;
+
+		$state = $params['objOrder']->getCurrentState();
+		if ($state == Configuration::get('EGM_Pago_4_Efectivo_OS') || $state == Configuration::get('PS_OS_OUTOFSTOCK'))
+		{
+			$this->smarty->assign(array(
+				'total_to_pay' => Tools::displayPrice($params['total_to_pay'], $params['currencyObj'], false),
+				'EGM_Pago_4_Efectivo_Mensajes' => Tools::nl2br($this->Mensajes),
+				'status' => 'ok',
+				'id_order' => $params['objOrder']->id
+			));
+			if (isset($params['objOrder']->reference) && !empty($params['objOrder']->reference))
+				$this->smarty->assign('reference', $params['objOrder']->reference);
+		}
+		else
+			$this->smarty->assign('status', 'failed');
+		return $this->display(__FILE__, 'payment_return.tpl');
+	}
+	
+	public function checkCurrency($cart)
+	{
+		$currency_order = new Currency($cart->id_currency);
+		$currencies_module = $this->getCurrency($cart->id_currency);
+
+		if (is_array($currencies_module))
+			foreach ($currencies_module as $currency_module)
+				if ($currency_order->id == $currency_module['id_currency'])
+					return true;
+		return false;
+	}
+}
